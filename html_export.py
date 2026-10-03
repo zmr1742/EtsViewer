@@ -128,8 +128,16 @@ def _highlight_keywords(text: str, keywords) -> str:
 class _Renderer:
     """渲染上下文：负责素材定位、图片/音频标签、各题型渲染"""
 
-    def __init__(self, html_dir: str):
+    def __init__(self, html_dir: str, notes=None):
         self.html_dir = html_dir
+        self.notes = notes or {}
+
+    def note_html(self, key: str) -> str:
+        """渲染一条笔记（题后附加）"""
+        note = self.notes.get(key, "")
+        if not note:
+            return ""
+        return f'<div class="note">📝 {_esc(note)}</div>'
 
     def _resolve(self, content_dir: str, file_name: str) -> str:
         if not file_name:
@@ -214,6 +222,7 @@ class _Renderer:
             answer = xt.get("answer", "")
             value = clean_html_tags(xt.get("xt_value", ""))
             xt_audio = xt.get("xt_wj", "") or (fallback_audio if len(xtlist) == 1 else "")
+            note = self.note_html(block_key + f"-q{i}")
             parts.append(
                 f'<div class="question" data-checkkey="{_esc(block_key)}-q{i}">'
                 f'<div class="q-head"><span class="q-num">{i}</span>'
@@ -222,6 +231,7 @@ class _Renderer:
                 f'{self.audio(content_dir, xt_audio) if xt_audio else ""}'
                 f'</div>{self.check(block_key + f"-q{i}")}</div>'
                 f'<div class="opts">{self._render_options(xt.get("xxlist", []), answer, content_dir)}</div>'
+                f'{note}'
                 f'</div>')
         return "".join(parts)
 
@@ -265,6 +275,7 @@ class _Renderer:
             askimg = self.img(content_dir, q.get("askimg", ""), alt=f"第{i}题图片")
             askaudio = self.audio(content_dir, q.get("askaudio", ""))
             kw = "".join(f'<span class="badge kw">{_esc(k)}</span>' for k in keywords)
+            note = self.note_html(block_key + f"-q{i}")
             subj = (
                 f'<div class="question subjective" data-checkkey="{_esc(block_key)}-q{i}">'
                 f'<div class="q-head"><div class="q-main">'
@@ -274,6 +285,7 @@ class _Renderer:
                 f'</div></div>{self.check(block_key + f"-q{i}")}</div>'
                 f'<div class="meta-row">{kw}</div>'
                 f'{self.answer_list(std, keywords)}'
+                f'{note}'
                 f'</div>')
             parts.append(subj)
         return "".join(parts)
@@ -304,7 +316,8 @@ class _Renderer:
             f'<div class="q-head"><div class="q-main"><span class="q-num">1</span>'
             f'<div class="subj-title"><p class="q-text">参考答案</p></div></div>'
             f'{self.check(block_key + "-q1")}</div>'
-            f'{self.answer_list(std)}</div>')
+            f'{self.answer_list(std)}'
+            f'{self.note_html(block_key + "-q1")}</div>')
         return "".join(parts)
 
     def _render_read(self, data, content_dir, block_key=""):
@@ -377,7 +390,8 @@ class _Renderer:
             f'<div class="question subjective" data-checkkey="{_esc(block_key)}-q1">'
             f'<div class="q-head"><div class="q-main"><span class="q-num">1</span>'
             f'<div class="subj-title"><p class="q-text">参考答案</p></div></div>'
-            f'{self.check(block_key + "-q1")}</div></div>')
+            f'{self.check(block_key + "-q1")}</div>'
+            f'{self.note_html(block_key + "-q1")}</div>')
         return "".join(parts)
 
 
@@ -494,6 +508,7 @@ body{background:var(--bg);color:var(--fg);font-family:ui-sans-serif,system-ui,-a
 .check-toggle:hover{background:var(--muted);opacity:1}
 .check-toggle.on{background:var(--primary);color:#fff;opacity:1;box-shadow:0 1px 3px rgba(15,157,107,.4)}
 .audio{width:100%;max-width:20rem;height:1.9rem;margin-top:.45rem}
+.note{margin-top:.55rem;margin-left:2.05rem;font-size:.8rem;font-weight:500;color:var(--amber);background:var(--amber-bg);border-left:.2rem solid var(--amber);border-radius:.4rem;padding:.4rem .7rem}
 mark.kw-mark{background:var(--amber-bg);color:var(--amber);border-radius:.2rem;padding:0 .15rem}
 mark.search-hit{background:#6ee7b7;color:#064e3b;border-radius:.2rem;padding:0 .15rem}
 html.dark mark.search-hit{background:#10b981;color:#052e1f}
@@ -643,9 +658,9 @@ JS = """
 """
 
 
-def build_html_doc(contents, names, dirs, html_dir, root_name=""):
+def build_html_doc(contents, names, dirs, html_dir, root_name="", notes=None):
     """生成整卷单文件 HTML，返回 HTML 字符串"""
-    renderer = _Renderer(html_dir)
+    renderer = _Renderer(html_dir, notes)
     choice_sections, choice_questions, subjective_questions, answers = _compute_stats(contents)
 
     blocks = []

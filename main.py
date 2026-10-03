@@ -46,8 +46,31 @@ class Viewer(wx.Frame):
         help_menu.Bind(wx.EVT_MENU, self._show_about, id=3)
         self.menu_bar.Append(help_menu, "帮助")
 
+        probe_menu = wx.Menu()
+        probe_menu.Append(4, "探测E听说进程")
+        probe_menu.Bind(wx.EVT_MENU, self._probe_ets, id=4)
+        self.menu_bar.Append(probe_menu, "探测")
         self.SetMenuBar(self.menu_bar)
         self._open_menu = open_menu
+
+    def _probe_ets(self, *_):
+        """探测系统中疑似 E听说 的进程及其窗口标题"""
+        from ets_probe import find_ets_processes, get_window_titles
+        procs = find_ets_processes()
+        if not procs:
+            wx.MessageBox("未发现疑似 E听说 的进程\n\n提示：请先运行 E听说 客户端再探测。", "探测结果",
+                          wx.OK | wx.ICON_INFORMATION, parent=self)
+            return
+        lines = []
+        for pid, name in procs:
+            lines.append(f"[{pid}] {name}")
+            titles = get_window_titles(pid)
+            if titles:
+                for t in titles:
+                    lines.append(f"    窗口标题：{t}")
+            else:
+                lines.append("    （无可见表窗口）")
+        wx.MessageBox("\n".join(lines), "探测结果", wx.OK | wx.ICON_INFORMATION, parent=self)
 
     def _show_about(self, *_):
         """显示关于对话框"""

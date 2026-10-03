@@ -12,8 +12,9 @@ from os.path import getmtime, join as path_join, isfile
 
 from utils import MAX_SIZE, get_font, AudioPlayer
 from formatters import format_question_json, extract_choose_images, extract_audio_list, extract_role_images
-from html_export import build_html_doc, _specific_type_name
+from html_export import build_html_doc
 from png_export import export_content_png
+from notes import load_notes, notes_for_content, get_note, set_note
 
 
 class CenteredStaticText(wx.StaticText):
@@ -117,6 +118,10 @@ class ContentJsonViewer(wx.Panel):
         self.export_png_btn.Bind(wx.EVT_BUTTON, self._export_to_png)
         self.export_png_btn.Enable(False)
 
+        self.note_btn = wx.Button(self, label="编辑笔记")
+        self.note_btn.Bind(wx.EVT_BUTTON, self._on_note_btn)
+        self.note_btn.Enable(False)
+
         self.audio_choice = wx.Choice(self)
         self.audio_btn = wx.Button(self, label="播放")
         self.audio_btn.Bind(wx.EVT_BUTTON, self._on_audio_btn)
@@ -127,6 +132,7 @@ class ContentJsonViewer(wx.Panel):
         option_sizer.Add(self.export_btn, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
         option_sizer.Add(self.export_html_btn, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
         option_sizer.Add(self.export_png_btn, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
+        option_sizer.Add(self.note_btn, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
         option_sizer.AddStretchSpacer()
         option_sizer.Add(self.audio_choice, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
         option_sizer.Add(self.audio_btn, proportion=0, flag=wx.LEFT | wx.RIGHT, border=10)
@@ -263,11 +269,72 @@ class ContentJsonViewer(wx.Panel):
                 self.contents[self.content_index],
                 show_full_answers=self.show_full_answers
             )
+            formatted_content = self._append_notes(formatted_content)
         else:
             formatted_content = json.dumps(self.contents[self.content_index], indent=4, ensure_ascii=False)
         self.json_viewer.SetValue(formatted_content)
         self._update_images()
         self._update_audio()
+
+    def _current_block_key(self) -> str:
+        """当前内容块的笔记 key 前缀（与 HTML 导出一致）"""
+        dir_path_parts = self.activate_exam_dir.replace('\\', '/').split('/')
+        folder_name = dir_path_parts[-1] if dir_path_parts[-1] else dir_path_parts[-2]
+        if not self.contents or self.content_index >= len(self.content_names):
+            return folder_name
+        return f"{folder_name}-{self.content_names[self.content_index]}"
+
+    def _question_count(self, data) -> int:
+        """返回内容块中可标记的题目数"""
+        info = data.get("info", {}) or {}
+        st = data.get("structure_type", "")
+        if st == "collector.choose":
+            return len(info.get("xtlist", []))
+        if st == "collector.role":
+            return len(info.get("question", []))
+        if st in ("collector.picture", "collector.word"):
+            return 1
+        return 0
+
+    def _append_notes(self, text: str) -> str:
+        """在格式化内容后附加当前内容块的笔记区块"""
+        notes = notes_for_content(load_notes(), self._current_block_key())
+        if not notes:
+            return text
+        lines = ["", "==我的笔记=="]
+        for no in sorted(notes):
+            lines.append(f"第 {no} 题：{notes[no]}")
+        return text + "\n" + "\n".join(lines)
+
+    def _edit_note(self, question_no: int):
+        """编辑指定题号的笔记（留空删除）"""
+        key = f"{self._current_block_key()}-q{question_no}"
+        notes = load_notes()
+        dlg = wx.TextEntryDialog(
+            self,
+            message=f"第 {question_no} 题的笔记（留空则删除笔记）：",
+            caption="编辑笔记",
+            value=get_note(notes, key),
+        )
+        if dlg.ShowModal() == wx.ID_OK:
+            value = dlg.GetValue().strip()
+            set_note(notes, key, value)
+            self._content_change()
+        dlg.Destroy()
+
+    def _on_note_btn(self, _):
+        """弹出题目菜单选择要编辑笔记的题"""
+        if not self.contents:
+            return
+        question_count = self._question_count(self.contents[self.content_index])
+        if question_count == 0:
+            wx.MessageBox("当前内容没有可标记的题目", "提示", wx.OK | wx.ICON_INFORMATION, parent=self)
+            return
+        menu = wx.Menu()
+        for i in range(1, question_count + 1):
+            menu.Append(i, f"第 {i} 题")
+            menu.Bind(wx.EVT_MENU, lambda e: self._edit_note(e.GetId()), id=i)
+        self.content_dir_text.PopupMenu(menu)
 
     def _update_audio(self):
         """刷新音频选择列表"""
@@ -400,14 +467,17 @@ class ContentJsonViewer(wx.Panel):
     def _build_role_images(self, role_images):
         """在图片预览区中渲染角色扮演各题的题干图片"""
         normal_colour = self.image_panel.GetBackgroundColour()
+        notes = notes_for_content(load_notes(), self._current_block_key())
         for idx, item in enumerate(role_images, 1):
             box = wx.Panel(self.image_panel)
             box.SetBackgroundColour(normal_colour)
             box_sizer = wx.BoxSizer(wx.VERTICAL)
 
-            title = wx.StaticText(box, label=f"第 {idx} 题　题干图片")
+            title = wx.StaticText(box, label=f"第 {idx} 题　题干图片（点击可编辑笔记）")
             title.SetBackgroundColour(normal_colour)
+            title.SetForegroundColour(wx.Colour(15, 157, 107))
             box_sizer.Add(title, flag=wx.TOP | wx.LEFT | wx.RIGHT, border=8)
+            title.Bind(wx.EVT_LEFT_DOWN, lambda e, idx=idx: self._edit_note(idx))
 
             bitmap = self._load_option_image(item["img"])
             if bitmap:
@@ -419,6 +489,13 @@ class ContentJsonViewer(wx.Panel):
                 missing.SetBackgroundColour(normal_colour)
                 box_sizer.Add(missing, flag=wx.ALL, border=8)
 
+            note_text = notes.get(idx, "")
+            if note_text:
+                note_lbl = wx.StaticText(box, label=f"📝 {note_text}")
+                note_lbl.SetBackgroundColour(normal_colour)
+                note_lbl.SetForegroundColour(wx.Colour(180, 83, 9))
+                box_sizer.Add(note_lbl, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=8)
+
             box.SetSizer(box_sizer)
             self.image_sizer.Add(box, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
 
@@ -426,11 +503,14 @@ class ContentJsonViewer(wx.Panel):
         """在图片预览区中逐题渲染选项图片"""
         highlight_colour = wx.Colour(210, 240, 210)
         normal_colour = self.image_panel.GetBackgroundColour()
+        notes = notes_for_content(load_notes(), self._current_block_key())
         for idx, question in enumerate(choose_images, 1):
             if not question["options"]:
                 continue
-            title = wx.StaticText(self.image_panel, label=f"第 {idx} 题　正确答案：{question['answer']}")
+            title = wx.StaticText(self.image_panel, label=f"第 {idx} 题　正确答案：{question['answer']}（点击可编辑笔记）")
+            title.SetForegroundColour(wx.Colour(15, 157, 107))
             self.image_sizer.Add(title, flag=wx.TOP | wx.LEFT | wx.RIGHT | wx.BOTTOM, border=8)
+            title.Bind(wx.EVT_LEFT_DOWN, lambda e, idx=idx: self._edit_note(idx))
 
             option_sizer = wx.BoxSizer(wx.HORIZONTAL)
             for opt in question["options"]:
@@ -457,6 +537,12 @@ class ContentJsonViewer(wx.Panel):
                 box.SetSizer(box_sizer)
                 option_sizer.Add(box, flag=wx.LEFT | wx.RIGHT | wx.BOTTOM, border=6)
             self.image_sizer.Add(option_sizer, flag=wx.LEFT, border=6)
+
+            note_text = notes.get(idx, "")
+            if note_text:
+                note_lbl = wx.StaticText(self.image_panel, label=f"📝 {note_text}")
+                note_lbl.SetForegroundColour(wx.Colour(180, 83, 9))
+                self.image_sizer.Add(note_lbl, flag=wx.LEFT | wx.BOTTOM, border=14)
 
     def _load_option_image(self, file_name: str, max_height=150, max_width=220):
         """加载并缩放选项图片，失败返回None"""
@@ -510,6 +596,7 @@ class ContentJsonViewer(wx.Panel):
         self.content_index = 0
         self.export_html_btn.Enable(bool(self.contents))
         self.export_png_btn.Enable(bool(self.contents))
+        self.note_btn.Enable(bool(self.contents))
         self._content_change()
 
     def _export_to_txt(self, event: wx.CommandEvent):
@@ -545,6 +632,9 @@ class ContentJsonViewer(wx.Panel):
                         else:
                             formatted_content = json.dumps(content_data, indent=4, ensure_ascii=False)
                         file.write(formatted_content)
+                        block_notes = notes_for_content(load_notes(), f"{folder_name}-{content_name}")
+                        for no in sorted(block_notes):
+                            file.write(f"[笔记] 第 {no} 题：{block_notes[no]}\n")
                         file.write("\n\n")
                 wx.MessageBox(f"导出成功！文件保存至：\n{pathname}", "成功", wx.OK | wx.ICON_INFORMATION)
             except IOError:
@@ -576,6 +666,7 @@ class ContentJsonViewer(wx.Panel):
                 html_text = build_html_doc(
                     self.contents, self.content_names, self.content_dirs,
                     html_dir=html_dir, root_name=folder_name,
+                    notes=load_notes(),
                 )
                 with open(pathname, 'w', encoding='utf-8') as file:
                     file.write(html_text)
@@ -610,7 +701,8 @@ class ContentJsonViewer(wx.Panel):
 
             pathname = fileDialog.GetPath()
             try:
-                export_content_png(content, content_dir, pathname, type_name)
+                export_content_png(content, content_dir, pathname, type_name,
+                                   block_key=self._current_block_key(), notes=load_notes())
                 wx.MessageBox(f"导出成功！文件保存至：\n{pathname}", "成功", wx.OK | wx.ICON_INFORMATION)
             except (IOError, OSError) as e:
                 wx.MessageBox(f"无法保存文件：{pathname}\n{e}", "错误", wx.OK | wx.ICON_ERROR)
