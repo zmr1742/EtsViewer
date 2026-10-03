@@ -25,6 +25,47 @@ def format_question_json(json_data, show_full_answers=True):
     return json.dumps(json_data, indent=4, ensure_ascii=False)
 
 
+def extract_audio_list(json_data):
+    """从数据中提取音频列表，返回 [{"label", "file"}]"""
+    info = json_data.get("info", {}) or {}
+    structure_type = json_data.get("structure_type", "")
+    result = []
+
+    if structure_type == "collector.choose":
+        xtlist = info.get("xtlist", [])
+        if any(xt.get("xt_wj") for xt in xtlist):
+            for i, xt in enumerate(xtlist, 1):
+                wj = xt.get("xt_wj", "")
+                if wj:
+                    result.append({"label": f"第 {i} 题", "file": wj})
+            return result
+
+    if structure_type == "collector.role":
+        questions = info.get("question", [])
+        if any(q.get("askaudio") for q in questions):
+            for i, q in enumerate(questions, 1):
+                aud = q.get("askaudio", "")
+                if aud:
+                    result.append({"label": f"第 {i} 题", "file": aud})
+            return result
+
+    audio = info.get("audio", "")
+    if audio:
+        result.append({"label": "录音", "file": audio})
+    return result
+
+
+def extract_role_images(json_data):
+    """从角色扮演数据中提取各题题干图片文件名"""
+    info = json_data.get("info", {})
+    result = []
+    for q in info.get("question", []):
+        img = q.get("askimg", "")
+        if img:
+            result.append({"xh": q.get("xh", ""), "img": img})
+    return result
+
+
 def format_role_type(json_data, show_full_answers):
     """格式化角色扮演题型"""
     result = []
@@ -104,6 +145,25 @@ def format_picture_type(json_data, show_full_answers):
             result.append("")
     
     return "\n".join(result)
+
+
+def extract_choose_images(json_data):
+    """从选择题数据中提取各题选项图片文件名及正确答案"""
+    info = json_data.get("info", {})
+    result = []
+    for xt_item in info.get("xtlist", []):
+        answer = xt_item.get("answer", "")
+        options = [
+            {
+                "mc": opt.get("xx_mc", ""),
+                "wj": opt.get("xx_wj", ""),
+                "is_answer": opt.get("xx_mc", "") == answer,
+            }
+            for opt in xt_item.get("xxlist", [])
+            if opt.get("xx_wj")
+        ]
+        result.append({"answer": answer, "options": options})
+    return result
 
 
 def format_choose_type(json_data, show_full_answers=True):

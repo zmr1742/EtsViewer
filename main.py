@@ -40,8 +40,36 @@ class Viewer(wx.Frame):
         open_menu.Bind(wx.EVT_MENU, self._load_default_dir, id=1)
         open_menu.Bind(wx.EVT_MENU, self._reload, id=2)
         self.menu_bar.Append(open_menu, "操作")
+
+        help_menu = wx.Menu()
+        help_menu.Append(3, "关于 EtsViewer")
+        help_menu.Bind(wx.EVT_MENU, self._show_about, id=3)
+        self.menu_bar.Append(help_menu, "帮助")
+
         self.SetMenuBar(self.menu_bar)
         self._open_menu = open_menu
+
+    def _show_about(self, *_):
+        """显示关于对话框"""
+        import wx.adv
+        info = wx.adv.AboutDialogInfo()
+        info.SetName("EtsViewer")
+        info.SetVersion("1.0.0")
+        info.SetDescription(
+            "ETS 考试内容查看器（增强 Fork）\n\n"
+            "基于 Maicy0609/EtsViewer（原 hite4044/EtsContentViewer）\n\n"
+            "增强功能：\n"
+            "- 选择题选项图片预览（正确答案高亮）\n"
+            "- 音频播放与进度/音量控制\n"
+            "- HTML 单文件导出（含图片/音频/交互）\n"
+            "- PNG 图片导出\n"
+            "- 深浅色主题切换"
+        )
+        info.SetCopyright("(c) 2024-2026 Maicy0609, hite4044, 追梦人")
+        info.SetWebSite("https://github.com/Maicy0609/EtsViewer")
+        info.AddDeveloper("追梦人 (zmr1742)")
+        info.SetLicense("MIT License")
+        wx.adv.AboutBox(info)
 
     def _reload(self, *_) -> None:
         """刷新当前目录"""
@@ -85,6 +113,7 @@ class Viewer(wx.Frame):
 
 if __name__ == "__main__":
     app = wx.App()
+    wx.Log.SetLogLevel(wx.LOG_Error)
     viewer = Viewer(None)
     viewer.Show()
     app.MainLoop()
